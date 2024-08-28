@@ -246,6 +246,7 @@ static int8_t initWaylandDisplay(struct wl_display** wlDisplay, struct wl_surfac
     *wlDisplay = wl_display_connect(NULL);
     if(*wlDisplay == NULL)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -256,12 +257,14 @@ static int8_t initWaylandDisplay(struct wl_display** wlDisplay, struct wl_surfac
     wl_display_roundtrip(*wlDisplay);
     if (globals.compositor == NULL || globals.shell == NULL)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
     *wlSurface = wl_compositor_create_surface(globals.compositor);
     if (*wlSurface == NULL)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
@@ -288,18 +291,21 @@ static int8_t initWindow(GLint width, GLint height, struct wl_display** wlDispla
     ret = initWaylandDisplay(wlDisplay, &wlSurface);
     if (ret != 0)
     {
+        printf("%s failed - line %d ret=%d\n", __FUNCTION__, __LINE__,ret);
         return -1;
     }
 
     struct wl_egl_window* wlEglWindow = wl_egl_window_create(wlSurface, width, height);
     if (wlEglWindow == NULL)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
 
     ret = initEGLDisplay((EGLNativeDisplayType)*wlDisplay, (EGLNativeWindowType)wlEglWindow, eglDisplay, eglSurface);
     if (ret != 0)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
     return 0;
@@ -328,6 +334,7 @@ uint8_t Wayland::init(uint32_t w, uint32_t h, uint32_t c, bool overlay)
     ret = initWindow(w, h, &display, &eglDisplay, &eglSurface);
     if (ret != 0)
     {
+        printf("%s failed - line %d ret=%d\n", __FUNCTION__, __LINE__, ret);
         return -1;
     }
 
@@ -335,6 +342,7 @@ uint8_t Wayland::init(uint32_t w, uint32_t h, uint32_t c, bool overlay)
     GLuint programObject = initProgramObject(&sShader);
     if (programObject == 0)
     {
+        printf("%s failed - line %d\n", __FUNCTION__, __LINE__);
         return -1;
     }
 

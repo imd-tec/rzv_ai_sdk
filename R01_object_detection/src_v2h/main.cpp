@@ -253,6 +253,9 @@ int8_t get_result()
     /* Get the number of output of the target model. */
     output_num = runtime.GetNumOutput();
     size_count = 0;
+    
+    // printf("Inference get_result ouput_num=%d\n", output_num);
+    
     /*GetOutput loop*/
     for (i = 0;i<output_num;i++)
     {
@@ -673,6 +676,7 @@ void *R_Inf_Thread(void *threadid)
             usleep(WAIT_TIME);
         }
 
+        // printf("Inference thread -  starting pre\n");
         /*Gets Pre-process Start time*/
         ret = timespec_get(&pre_start_time, TIME_UTC);
         if (0 == ret)
@@ -741,6 +745,8 @@ void *R_Inf_Thread(void *threadid)
             goto err;
         }
 
+        // printf("Inference thread -  starting post\n");
+
         /*CPU Post-Processing For YOLOv3*/
         R_Post_Proc(drpai_output_buf);
         
@@ -769,6 +775,18 @@ ai_inf_end:
     pthread_exit(NULL);
 }
 
+bool hasFrameChanged(const cv::Mat& frame1, const cv::Mat& frame2, double threshold = 1000.0) {
+    cv::Mat diff;
+    cv::absdiff(frame1, frame2, diff); // Get absolute difference between frames
+    cv::Mat gray_diff;
+    cv::cvtColor(diff, gray_diff, cv::COLOR_BGR2GRAY); // Convert to grayscale
+
+    double nonZeroCount = cv::countNonZero(gray_diff); // Count non-zero pixels
+
+    // Check if the change is significant based on the threshold
+    return nonZeroCount > threshold;
+}
+
 /*****************************************
 * Function Name : R_Capture_Thread
 * Description   : Executes the V4L2 capture with Capture thread.
@@ -777,6 +795,8 @@ ai_inf_end:
 ******************************************/
 void *R_Capture_Thread(void *threadid)
 {
+    cv::Mat previous_frame;
+    bool first_frame = true;
     std::string &gstream = gstreamer_pipeline;
     printf("[INFO] GStreamer pipeline: %s\n", gstream.c_str());
 
@@ -794,7 +814,8 @@ void *R_Capture_Thread(void *threadid)
 
     cv::VideoCapture g_cap;
     cv::Mat g_frame;
-    cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC3);
+    // cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC3);
+    cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC2); //For YUY2
 
     printf("Capture Thread Starting\n");
 
@@ -846,6 +867,7 @@ void *R_Capture_Thread(void *threadid)
         }
         else
         {
+            //printf("Catured thread - Image captured\n");
             /* Do not process until the camera stabilizes, because the image is unreliable until the camera stabilizes. */
             if( capture_stabe_cnt > 0 )
             {
@@ -855,6 +877,8 @@ void *R_Capture_Thread(void *threadid)
             {
                 if (!inference_start.load())
                 {
+                    // printf("Capture thread - Signalling inference...\n");
+
                     /* Copy captured image to Image object. This will be used in Main Thread. */
                     mtx.lock();
                     /*Image: CAM_IMAGE_WIDTH*CAM_IMAGE_HEIGHT (BGR) */
@@ -863,7 +887,7 @@ void *R_Capture_Thread(void *threadid)
                     /*Add padding for keeping the aspect ratio: CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH (BGR) */
                     cv::vconcat(input_image, padding_frame, input_image);
                     
-                    /*Copy input data to drpai_buf for DRP-AI Pre-processing Runtime.*/
+                    // /*Copy input data to drpai_buf for DRP-AI Pre-processing Runtime.*/
                     memcpy( drpai_buf->mem, input_image.data, drpai_buf->size);
                     /* Flush buffer */
                     ret = buffer_flush_dmabuf(drpai_buf->idx, drpai_buf->size);
@@ -872,17 +896,33 @@ void *R_Capture_Thread(void *threadid)
                         goto err;
                     }
                     mtx.unlock();
-                    inference_start.store(1); /* Flag for AI Inference Thread. */
+                    // inference_start.store(1); /* Flag for AI Inference Thread. */
                 }
 
                 if (!img_obj_ready.load())
                 {
+                    // printf("Capture thread - Signalling Image...\n");
+
                     mtx.lock();
                     capture_image = g_frame.clone();
                     img.set_mat(capture_image);
                     mtx.unlock();
                     img_obj_ready.store(1); /* Flag for Img Thread. */
                 }
+
+#if 0
+                if (!first_frame) {
+                    if (hasFrameChanged(previous_frame, g_frame)) {
+                        printf("Frame has changed!\n");
+                        // Update the display with the new frame
+                    } else {
+                        printf("Frame has not changed\n");
+                    }
+                } else {
+                    first_frame = false;
+                }
+                previous_frame = g_frame.clone();
+#endif
             }
         }
     } /*End of Loop*/
@@ -947,6 +987,8 @@ void *R_Img_Thread(void *threadid)
         /* Check img_obj_ready flag which is set in Capture Thread. */
         if (img_obj_ready.load())
         {
+            // printf("Image thread - Drawing\n");
+
             /* Draw bounding box on image. */
             draw_bounding_box();
 
@@ -1019,11 +1061,12 @@ void *R_Display_Thread(void *threadid)
         /* Check hdmi_obj_ready flag which is set in Capture Thread. */
         if (hdmi_obj_ready.load())
         {
-            /*Update Wayland*/
-            display_image = proc_image;
-            cv::cvtColor(display_image, display_image, cv::COLOR_BGR2BGRA);
+            // printf("Display Thread - wayland Commit \n");
+
+            /*Update Wayland - need to convert to BGRA for wayland*/
+            cv::cvtColor(proc_image, display_image, cv::COLOR_YUV2BGRA_YUY2);
             wayland.commit(display_image.data, NULL);
-            hdmi_obj_ready.store(0);
+                        hdmi_obj_ready.store(0);
         }
         usleep(WAIT_TIME); //wait 1 tick timedg
     } /*End Of Loop*/
@@ -1228,15 +1271,15 @@ int32_t main(int32_t argc, char * argv[])
 
     uint64_t drpaimem_addr_start = 0;
 
-    std::string media_port = query_device_status("usb");
-    gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! appsink -v";
+    std::string media_port = query_device_status("RZG2L_CRU");
+    gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
 
     /*Disable OpenCV Accelerator due to the use of multithreading */
     unsigned long OCA_list[16];
     for (int i=0; i < 16; i++) OCA_list[i] = 0;
     OCA_Activate( &OCA_list[0] );
 
-    printf("RZ/V2H AI SDK Sample Application\n");
+    printf("RZ/V2H AI SDK Sample Application - IMDT modified\n");
     printf("Model : Darknet YOLOv3 | %s\n", model_dir.c_str());
     printf("Input : %s\n", INPUT_CAM_NAME);
 
@@ -1324,7 +1367,7 @@ int32_t main(int32_t argc, char * argv[])
 
     /*Initialize buffer for DRP-AI Pre-processing Runtime. */
     drpai_buf = (dma_buffer*)malloc(sizeof(dma_buffer));
-    ret = buffer_alloc_dmabuf(drpai_buf,CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH*CAM_IMAGE_CHANNEL_BGR);
+    ret = buffer_alloc_dmabuf(drpai_buf,CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH*CAM_IMAGE_CHANNEL_YUY2);
     if (-1 == ret)
     {
         fprintf(stderr, "[ERROR] Failed to Allocate DMA buffer for the drpai_buf\n");
@@ -1332,7 +1375,7 @@ int32_t main(int32_t argc, char * argv[])
     }
 
     /*Initialize Image object.*/
-    ret = img.init(CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT, CAM_IMAGE_CHANNEL_BGR, 
+    ret = img.init(CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT, CAM_IMAGE_CHANNEL_YUY2, 
                     IMAGE_OUTPUT_WIDTH, IMAGE_OUTPUT_HEIGHT, IMAGE_OUTPUT_CHANNEL_BGRA);
     if (0 != ret)
     {
@@ -1388,6 +1431,7 @@ int32_t main(int32_t argc, char * argv[])
     }
 
     /*Create Display Thread*/
+    
     create_thread_hdmi = pthread_create(&hdmi_thread, NULL, R_Display_Thread, NULL);
     if(0 != create_thread_hdmi)
     {
@@ -1396,6 +1440,7 @@ int32_t main(int32_t argc, char * argv[])
         ret_main = -1;
         goto end_threads;
     }
+
     /*Main Processing*/
     main_proc = R_Main_Process();
     if (0 != main_proc)

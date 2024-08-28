@@ -140,9 +140,10 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 #define DRPAI_TIMEOUT               (5)
 
 /*Camera Capture Image Information*/
-#define CAM_IMAGE_WIDTH             (640)
-#define CAM_IMAGE_HEIGHT            (480)
-#define CAM_IMAGE_CHANNEL_BGR       (3)
+#define CAM_IMAGE_WIDTH             (1920)//(640)
+#define CAM_IMAGE_HEIGHT            (1080)//(480)
+#define CAM_IMAGE_CHANNEL_YUY2      (2)
+
 /*Camera Capture Information */
 #define INPUT_CAM_NAME              "USB Camera"
 #define CAPTURE_STABLE_COUNT        (8)
@@ -150,7 +151,7 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 /*DRP-AI Input image information*/
 /*** DRP-AI input is assigned to the buffer having the size of CAM_IMAGE_WIDTH^2 */
 #define DRPAI_IN_WIDTH              (CAM_IMAGE_WIDTH)
-#define DRPAI_IN_HEIGHT             (CAM_IMAGE_WIDTH) 
+#define DRPAI_IN_HEIGHT             (CAM_IMAGE_HEIGHT) //[RB] is this a typo ?
 
 /*Wayland Display Image Information*/
 #define IMAGE_OUTPUT_WIDTH          (1920)
