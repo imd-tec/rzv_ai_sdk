@@ -88,7 +88,7 @@
 *  - model_dir = directory name of DRP-AI TVM[*1] Model Object files
 ******************************************/
 /* Model Binary */
-const static std::string model_dir = "yolov3_onnx";
+const static std::string model_dir = "yolov3_onnx_fhd";
 /* Pre-processing Runtime Object */
 const static std::string pre_dir = model_dir + "/preprocess";
 /* Anchor box information */
@@ -140,18 +140,21 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 #define DRPAI_TIMEOUT               (5)
 
 /*Camera Capture Image Information*/
-#define CAM_IMAGE_WIDTH             (1920)//(640)
-#define CAM_IMAGE_HEIGHT            (1080)//(480)
+// #define CAM_IMAGE_WIDTH             (640)
+// #define CAM_IMAGE_HEIGHT            (480)
+#define CAM_IMAGE_WIDTH             (1920)
+#define CAM_IMAGE_HEIGHT            (1080)
+#define CAM_IMAGE_CHANNEL_BGR       (3) 
 #define CAM_IMAGE_CHANNEL_YUY2      (2)
 
 /*Camera Capture Information */
-#define INPUT_CAM_NAME              "USB Camera"
+#define INPUT_CAM_NAME              "MIPI Camera"
 #define CAPTURE_STABLE_COUNT        (8)
 
 /*DRP-AI Input image information*/
 /*** DRP-AI input is assigned to the buffer having the size of CAM_IMAGE_WIDTH^2 */
 #define DRPAI_IN_WIDTH              (CAM_IMAGE_WIDTH)
-#define DRPAI_IN_HEIGHT             (CAM_IMAGE_HEIGHT) //[RB] is this a typo ?
+#define DRPAI_IN_HEIGHT             (CAM_IMAGE_WIDTH) 
 
 /*Wayland Display Image Information*/
 #define IMAGE_OUTPUT_WIDTH          (1920)

@@ -531,11 +531,16 @@ uint8_t PreRuntime::Load(const std::string pre_dir, uint64_t start_addr)
         return PRE_ERROR;
     }
 
+    // printf("-->DRP memory area read as start=0x%09llX, size=0x%09llX\n", drpai_data0.address, drpai_data0.size);
+
     if(start_addr == INVALID_ADDR)
-    {
+    {        
         this->Occupied_size = drpai_obj_info.drpai_address.desc_drp_addr + drpai_obj_info.drpai_address.desc_drp_size;
         this->Occupied_size = (Occupied_size + 0xffffff) & 0xff000000;
         start_addr = drpai_data0.address + drpai_data0.size - Occupied_size;
+        // start_addr = drpai_data0.address; //Set at the start of the region
+        // printf("-->Using INVALID_ADDR option: Size rounded up to 0x%x\n", Occupied_size);
+        // printf("-->Start address for conversion=0x%09llX\n", start_addr);
     }
     else
     {
@@ -556,9 +561,15 @@ uint8_t PreRuntime::Load(const std::string pre_dir, uint64_t start_addr)
        return PRE_ERROR;
     }
 
+    //printf("-->1st conversion (replace): 0x%09llX -> 0x%09llX (0x%llx)\n", drpai_adrconv.org_address, drpai_adrconv.conv_address,  drpai_adrconv.size);
     /*Define the start address.*/
     /*drpai_obj_info.drpai_address.data_in_addr maybe 0x00000000. */
     drpai_obj_info.data_inout.start_address = drpai_adrconv.conv_address - drpai_obj_info.drpai_address.data_in_addr;
+
+    //printf("-->setting inout address to : 0x%09llX (0x%09llX - 0x%09llx)\n", 
+        // drpai_obj_info.data_inout.start_address,
+        // drpai_adrconv.conv_address,  
+        // drpai_obj_info.drpai_address.data_in_addr);
 
     /*Parse drp_param_info.txt*/
     ret = ParseParamInfo(drpai_param_file);
@@ -677,6 +688,7 @@ uint8_t PreRuntime::Pre(s_preproc_param_t* param, void** out_ptr, uint32_t* out_
 {
     if((param->pre_in_addr & 0x800000000000) != 0)
     {
+        //printf("-->Pre(). line %d addr is 0x%09llX\n",__LINE__, param->pre_in_addr);
         /* Virtual address in linux user space */
         SetInput((void *)param->pre_in_addr);
 
@@ -689,9 +701,10 @@ uint8_t PreRuntime::Pre(s_preproc_param_t* param, void** out_ptr, uint32_t* out_
     }
     else
     {
+        //printf("-->Pre(). line %d addr is 0x%09llX\n",__LINE__, param->pre_in_addr);
 
         if(this->mapped_in_addr_v2h != param->pre_in_addr){
-	    int ret = 0;
+            int ret = 0;
 
             drpai_adrconv_t drpai_adrconv;
             drpai_adrconv.conv_address = this->start_addr_v2h;
@@ -705,6 +718,8 @@ uint8_t PreRuntime::Pre(s_preproc_param_t* param, void** out_ptr, uint32_t* out_
                 return PRE_ERROR;
             }
 
+            //printf("--> 2nd conversion (replace): 0x%09llX -> 0x%09llX (0x%llx)\n", drpai_adrconv.org_address, drpai_adrconv.conv_address,  drpai_adrconv.size);
+
             this->mapped_in_addr_v2h = param->pre_in_addr;
             drpai_adrconv.conv_address  = param->pre_in_addr & 0xffffff000000;
             drpai_adrconv.org_address   = 0xD0000000;
@@ -717,6 +732,9 @@ uint8_t PreRuntime::Pre(s_preproc_param_t* param, void** out_ptr, uint32_t* out_
                 std::cerr << "[ERROR] Failed to run SET_ADRCONV(2) for DRP-AI input image : errno=" <<  errno << std::endl;
                 return PRE_ERROR;
             }
+
+            //printf("--> 3rd conversion (add): 0x%09llX -> 0x%09llX (0x%llx)\n", drpai_adrconv.org_address, drpai_adrconv.conv_address,  drpai_adrconv.size);
+
         }
 
         #ifndef WITH_V2H_DEV
@@ -832,5 +850,6 @@ uint8_t PreRuntime::Pre(void** out_ptr, uint32_t* out_size, uint64_t phyaddr)
     *out_ptr = internal_buffer;
     *out_size = internal_buffer_size;
 
+    // printf("Pre ouput address is 0x%llx size is 0x%x\n", internal_buffer, internal_buffer_size);
     return PRE_SUCCESS;
 }

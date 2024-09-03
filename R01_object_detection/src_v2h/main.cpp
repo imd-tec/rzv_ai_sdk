@@ -69,6 +69,9 @@
 /*****************************************
 * Global Variables
 ******************************************/
+bool use_bgr = true;
+bool use_roi = false;
+
 /*Multithreading*/
 static sem_t terminate_req_sem;
 static pthread_t ai_inf_thread;
@@ -87,6 +90,7 @@ static float drpai_output_buf[INF_OUT_SIZE];
 
 static Image img;
 /*Image to be displayed on GUI*/
+cv::Mat yuv_input_image;
 cv::Mat input_image;
 cv::Mat capture_image;
 cv::Mat proc_image;
@@ -649,6 +653,9 @@ void *R_Inf_Thread(void *threadid)
     in_param.pre_in_shape_h = DRPAI_IN_HEIGHT;
 
     printf("Inference Loop Starting\n");
+
+
+    int count = 0;
     /*Inference Loop Start*/
     while(1)
     {
@@ -693,6 +700,7 @@ void *R_Inf_Thread(void *threadid)
             fprintf(stderr, "[ERROR] Failed to run Pre-processing Runtime Pre()\n");
             goto err;
         }
+        
         /*Gets AI Pre-process End Time*/
         ret = timespec_get(&pre_end_time, TIME_UTC);
         if ( 0 == ret)
@@ -701,6 +709,7 @@ void *R_Inf_Thread(void *threadid)
             goto err;
         }
 
+        
         /*Set Pre-processing output to be inference input. */
         runtime.SetInput(0, (float*)output_ptr);
 
@@ -745,8 +754,6 @@ void *R_Inf_Thread(void *threadid)
             goto err;
         }
 
-        // printf("Inference thread -  starting post\n");
-
         /*CPU Post-Processing For YOLOv3*/
         R_Post_Proc(drpai_output_buf);
         
@@ -760,6 +767,7 @@ void *R_Inf_Thread(void *threadid)
         /*Post-process Time Result*/
 
         post_time = (timedifference_msec(post_start_time, post_end_time)*TIME_COEF);
+
     }
     /*End of Inference Loop*/
 
@@ -793,11 +801,18 @@ bool hasFrameChanged(const cv::Mat& frame1, const cv::Mat& frame2, double thresh
 * Arguments     : threadid = thread identification
 * Return value  : -
 ******************************************/
+#define RESET_THROTTLE 0//30*1;
+#define RESET_IMG_THROTTLE 0 //30*1
 void *R_Capture_Thread(void *threadid)
 {
+    int throttle_count = RESET_THROTTLE;
+    int img_throttle_count = RESET_IMG_THROTTLE;
+
     cv::Mat previous_frame;
     bool first_frame = true;
     std::string &gstream = gstreamer_pipeline;
+
+
     printf("[INFO] GStreamer pipeline: %s\n", gstream.c_str());
 
     /*Semaphore Variable*/
@@ -813,11 +828,12 @@ void *R_Capture_Thread(void *threadid)
 #endif /* DISP_CAM_FRAME_RATE */
 
     cv::VideoCapture g_cap;
+    cv::Mat g_frame_original;
+    cv::Mat g_frame_bgr;
     cv::Mat g_frame;
-    // cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC3);
-    cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC2); //For YUY2
 
-    printf("Capture Thread Starting\n");
+    printf("Capture Thread Starting use_bgr=%d use_roi=%d throttle_count=%d\n", 
+        use_bgr, use_roi, throttle_count);
 
     g_cap.open(gstream, cv::CAP_GSTREAMER);
     if (!g_cap.isOpened())
@@ -825,6 +841,7 @@ void *R_Capture_Thread(void *threadid)
         fprintf(stderr, "[ERROR] Failed to open camera.\n");
         goto err;
     }
+
 
     while(1)
     {
@@ -845,7 +862,29 @@ void *R_Capture_Thread(void *threadid)
 
         /* Capture camera image and stop updating the capture buffer */
 
-        g_cap.read(g_frame);
+        if(use_bgr)
+        {   
+            //Input is YUY2 1920x1080 but converting to BGR 640x480 here
+            //for YUY2 input convert to BGR before everything starts
+            g_cap.read(g_frame_original);
+            if(use_roi)
+            {
+                cv::cvtColor(g_frame_original, g_frame_bgr, cv::COLOR_YUV2BGR_YUY2);
+                cv::Rect roi(0, 0, 640, 480);
+                g_frame = g_frame_bgr(roi); // Using the () operator to crop
+            }
+            else
+            {
+                cv::cvtColor(g_frame_original, g_frame, cv::COLOR_YUV2BGR_YUY2);
+            }
+        }
+        else
+        {
+            g_cap.read(g_frame);
+        }
+        // printf("g_frame: d=%d c=%d rows=%d cols=%d\n", 
+        //     g_frame.depth(), g_frame.channels(), g_frame.rows, g_frame.cols);
+
 #ifdef DISP_CAM_FRAME_RATE
         cap_cnt++;
         ret = timespec_get(&capture_time, TIME_UTC);
@@ -867,7 +906,6 @@ void *R_Capture_Thread(void *threadid)
         }
         else
         {
-            //printf("Catured thread - Image captured\n");
             /* Do not process until the camera stabilizes, because the image is unreliable until the camera stabilizes. */
             if( capture_stabe_cnt > 0 )
             {
@@ -877,17 +915,26 @@ void *R_Capture_Thread(void *threadid)
             {
                 if (!inference_start.load())
                 {
-                    // printf("Capture thread - Signalling inference...\n");
 
                     /* Copy captured image to Image object. This will be used in Main Thread. */
                     mtx.lock();
+                    
                     /*Image: CAM_IMAGE_WIDTH*CAM_IMAGE_HEIGHT (BGR) */
                     input_image = g_frame.clone();
-                    
+
                     /*Add padding for keeping the aspect ratio: CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH (BGR) */
-                    cv::vconcat(input_image, padding_frame, input_image);
+                    if(use_bgr)
+                    {
+                        cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC3);   
+                        cv::vconcat(input_image, padding_frame, input_image);
+                    }
+                    else
+                    {
+                        cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC2); 
+                        cv::vconcat(input_image, padding_frame, input_image);
+                    }
                     
-                    // /*Copy input data to drpai_buf for DRP-AI Pre-processing Runtime.*/
+                    /*Copy input data to drpai_buf for DRP-AI Pre-processing Runtime.*/
                     memcpy( drpai_buf->mem, input_image.data, drpai_buf->size);
                     /* Flush buffer */
                     ret = buffer_flush_dmabuf(drpai_buf->idx, drpai_buf->size);
@@ -896,18 +943,34 @@ void *R_Capture_Thread(void *threadid)
                         goto err;
                     }
                     mtx.unlock();
-                    // inference_start.store(1); /* Flag for AI Inference Thread. */
+                    if(throttle_count > 0)
+                    {
+                        throttle_count--;
+                    }
+                    else
+                    {
+                        inference_start.store(1); /* Flag for AI Inference Thread. */
+                        throttle_count = RESET_THROTTLE;
+                    }
                 }
 
                 if (!img_obj_ready.load())
                 {
-                    // printf("Capture thread - Signalling Image...\n");
-
                     mtx.lock();
                     capture_image = g_frame.clone();
                     img.set_mat(capture_image);
                     mtx.unlock();
-                    img_obj_ready.store(1); /* Flag for Img Thread. */
+
+                    if(img_throttle_count > 0)
+                    {
+                        img_throttle_count--;
+                    }
+                    else
+                    {
+                        img_obj_ready.store(1); /* Flag for Img Thread. */
+                        img_throttle_count = RESET_IMG_THROTTLE;
+                    }                    
+                    
                 }
 
 #if 0
@@ -987,8 +1050,6 @@ void *R_Img_Thread(void *threadid)
         /* Check img_obj_ready flag which is set in Capture Thread. */
         if (img_obj_ready.load())
         {
-            // printf("Image thread - Drawing\n");
-
             /* Draw bounding box on image. */
             draw_bounding_box();
 
@@ -998,10 +1059,10 @@ void *R_Img_Thread(void *threadid)
             /*Displays AI Inference Results on display.*/
             print_result(&img);
             
-            proc_image = img.get_mat().clone(); 
-
             if (!hdmi_obj_ready.load())
             {
+                proc_image = img.get_mat().clone();
+
                 hdmi_obj_ready.store(1); /* Flag for Display Thread. */
             }
             img_obj_ready.store(0);
@@ -1034,14 +1095,18 @@ void *R_Display_Thread(void *threadid)
     int32_t hdmi_sem_check = 0;
     /*Variable for checking return value*/
     int8_t ret = 0;
-    /* Initialize waylad */
+
+    /* Initialize wayland */
     ret = wayland.init(IMAGE_OUTPUT_WIDTH, IMAGE_OUTPUT_HEIGHT, IMAGE_OUTPUT_CHANNEL_BGRA);
     if(0 != ret)
     {
         fprintf(stderr, "[ERROR] Failed to initialize Image for Wayland\n");
         goto err;
     }
+
     printf("Display Thread Starting\n");
+
+
     while(1)
     {
         /*Gets The Termination Request Semaphore Value, If Different Then 1 Termination Is Requested*/
@@ -1058,15 +1123,25 @@ void *R_Display_Thread(void *threadid)
         {
             goto hdmi_end;
         }
+
         /* Check hdmi_obj_ready flag which is set in Capture Thread. */
         if (hdmi_obj_ready.load())
         {
-            // printf("Display Thread - wayland Commit \n");
+            // printf("proc_image: d=%d c=%d rows=%d cols=%d\n", 
+            //     proc_image.depth(), proc_image.channels(), proc_image.rows, proc_image.cols);
 
+            // display_image = proc_image.clone();
             /*Update Wayland - need to convert to BGRA for wayland*/
-            cv::cvtColor(proc_image, display_image, cv::COLOR_YUV2BGRA_YUY2);
+            if(use_bgr)
+                cv::cvtColor(proc_image, display_image, cv::COLOR_BGR2BGRA); //for BGR processing
+            else
+                cv::cvtColor(proc_image, display_image, cv::COLOR_YUV2BGRA_YUY2); //for YUY2 processing
+
+            // printf("display_image: d=%d c=%d rows=%d cols=%d\n", 
+            //     display_image.depth(), display_image.channels(), display_image.rows, display_image.cols);
+
             wayland.commit(display_image.data, NULL);
-                        hdmi_obj_ready.store(0);
+            hdmi_obj_ready.store(0);
         }
         usleep(WAIT_TIME); //wait 1 tick timedg
     } /*End Of Loop*/
@@ -1272,7 +1347,9 @@ int32_t main(int32_t argc, char * argv[])
     uint64_t drpaimem_addr_start = 0;
 
     std::string media_port = query_device_status("RZG2L_CRU");
-    gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+    // gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+
+    gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
 
     /*Disable OpenCV Accelerator due to the use of multithreading */
     unsigned long OCA_list[16];
@@ -1312,6 +1389,16 @@ int32_t main(int32_t argc, char * argv[])
         goto end_main;
     }
 
+    /*Load pre_dir object to DRP-AI */
+    printf("Pre directory is %s\n", pre_dir.c_str());
+    ret = preruntime.Load(pre_dir);
+    if (0 < ret)
+    {
+        fprintf(stderr, "[ERROR] Failed to run Pre-processing Runtime Load().\n");
+        ret_main = -1;
+        goto end_close_drpai;
+    }
+
     /*DRP-AI Driver initialization*/
     errno = 0;
     drpai_fd = open("/dev/drpai0", O_RDWR);
@@ -1321,6 +1408,7 @@ int32_t main(int32_t argc, char * argv[])
         ret_main = -1;
         goto end_main;
     }
+    
     /*Get DRP-AI memory area start address*/
     drpaimem_addr_start = init_drpai(drpai_fd);
     if ((uint64_t)NULL == drpaimem_addr_start) 
@@ -1329,15 +1417,7 @@ int32_t main(int32_t argc, char * argv[])
         goto end_close_drpai;
     }
 
-    /*Load pre_dir object to DRP-AI */
-    ret = preruntime.Load(pre_dir);
-    if (0 < ret)
-    {
-        fprintf(stderr, "[ERROR] Failed to run Pre-processing Runtime Load().\n");
-        ret_main = -1;
-        goto end_close_drpai;
-    }
-
+    
     /*Load model_dir for DRP-AI inference */
     runtime_status = runtime.LoadModel(model_dir, drpaimem_addr_start);
 
@@ -1367,7 +1447,10 @@ int32_t main(int32_t argc, char * argv[])
 
     /*Initialize buffer for DRP-AI Pre-processing Runtime. */
     drpai_buf = (dma_buffer*)malloc(sizeof(dma_buffer));
-    ret = buffer_alloc_dmabuf(drpai_buf,CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH*CAM_IMAGE_CHANNEL_YUY2);
+    if(use_bgr)
+        ret = buffer_alloc_dmabuf(drpai_buf,CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH*CAM_IMAGE_CHANNEL_BGR);
+    else
+        ret = buffer_alloc_dmabuf(drpai_buf,CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH*CAM_IMAGE_CHANNEL_YUY2);
     if (-1 == ret)
     {
         fprintf(stderr, "[ERROR] Failed to Allocate DMA buffer for the drpai_buf\n");
@@ -1375,8 +1458,13 @@ int32_t main(int32_t argc, char * argv[])
     }
 
     /*Initialize Image object.*/
-    ret = img.init(CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT, CAM_IMAGE_CHANNEL_YUY2, 
-                    IMAGE_OUTPUT_WIDTH, IMAGE_OUTPUT_HEIGHT, IMAGE_OUTPUT_CHANNEL_BGRA);
+    if(use_bgr)
+        ret = img.init(CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT, CAM_IMAGE_CHANNEL_BGR, 
+                        IMAGE_OUTPUT_WIDTH, IMAGE_OUTPUT_HEIGHT, IMAGE_OUTPUT_CHANNEL_BGRA);
+    else
+        ret = img.init(CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT, CAM_IMAGE_CHANNEL_YUY2, 
+                        IMAGE_OUTPUT_WIDTH, IMAGE_OUTPUT_HEIGHT, IMAGE_OUTPUT_CHANNEL_BGRA);
+
     if (0 != ret)
     {
         fprintf(stderr, "[ERROR] Failed to initialize Image object.\n");

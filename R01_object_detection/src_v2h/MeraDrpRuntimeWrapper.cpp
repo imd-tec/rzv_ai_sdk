@@ -70,7 +70,9 @@ bool MeraDrpRuntimeWrapper::LoadModel(const std::string& model_dir, uint32_t sta
 }
 
 bool MeraDrpRuntimeWrapper::LoadModel(const std::string& model_dir, uint64_t start_address = 0x00) {
-    LOG(INFO) << "Loading json data...";
+    LOG(INFO) << "Loading json data... start address: 0x"
+             << std::hex << std::setw(9) << std::setfill('0') << start_address;
+      
     const std::string json_file(model_dir + "/deploy.json");
     std::ifstream json_in(json_file.c_str(), std::ios::in);
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
@@ -125,6 +127,10 @@ void MeraDrpRuntimeWrapper::SetInput(int input_index, const T* data_ptr) {
 
     auto input_array = tvm::runtime::NDArray::Empty(in_shape, xx.DataType(), ctx);
     auto input_data = (T*)(input_array->data);
+
+    //printf("Runtime Set input...size=0x%llx = 0x%llx * %d from 0x%llx to 0x%llx\n",
+    //sizeof(T) * in_size, in_size,sizeof(T),data_ptr,input_data  );
+    
     std::memcpy(input_data, data_ptr, sizeof(T) * in_size);
     tvm::runtime::PackedFunc set_input = mod.GetFunction("set_input");
     set_input(input_index, input_array);

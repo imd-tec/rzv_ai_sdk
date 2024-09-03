@@ -491,6 +491,10 @@ uint8_t Wayland::commit(uint8_t* cam_buffer, uint8_t* ol_buffer)
 #endif // DEBUG_TIME_FLG
 
     eglSwapBuffers(eglDisplay, eglSurface);
+    EGLint eglErr = eglGetError();
+    if (eglErr != EGL_SUCCESS) {
+        printf("EGL Error during eglSwapBuffers: 0x%x\n", eglErr);
+    }
 
 #ifdef DEBUG_TIME_FLG
     end = chrono::system_clock::now();
