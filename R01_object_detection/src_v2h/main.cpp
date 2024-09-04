@@ -66,6 +66,7 @@
 /*Mutual exclusion*/
 #include <mutex>
 
+
 /*****************************************
 * Global Variables
 ******************************************/
@@ -85,6 +86,7 @@ static std::mutex mtx;
 static std::atomic<uint8_t> inference_start (0);
 static std::atomic<uint8_t> img_obj_ready   (0);
 static std::atomic<uint8_t> hdmi_obj_ready  (0);
+
 /*Global Variables*/
 static float drpai_output_buf[INF_OUT_SIZE];
 
@@ -756,7 +758,7 @@ void *R_Inf_Thread(void *threadid)
 
         /*CPU Post-Processing For YOLOv3*/
         R_Post_Proc(drpai_output_buf);
-        
+
         /*Gets Post-process End Time*/
         ret = timespec_get(&post_end_time, TIME_UTC);
         if ( 0 == ret)
@@ -845,6 +847,8 @@ void *R_Capture_Thread(void *threadid)
 
     while(1)
     {
+        int empty_cnt = 0;
+
         /*Gets the Termination request semaphore value. If different then 1 Termination was requested*/
         /*Checks if sem_getvalue is executed wihtout issue*/
         errno = 0;
@@ -864,9 +868,23 @@ void *R_Capture_Thread(void *threadid)
 
         if(use_bgr)
         {   
-            //Input is YUY2 1920x1080 but converting to BGR 640x480 here
-            //for YUY2 input convert to BGR before everything starts
+            //Input is YUY2 1920x1080 but converting to BGR and if use_roi also 640x480 
             g_cap.read(g_frame_original);
+            if (g_frame_original.empty()) {
+                printf("Empty frame - retry\n");
+                usleep(1000*100);
+                if(empty_cnt++ > 10)
+                {
+                    fprintf(stderr, "[ERROR] too many empty frames %d\n",empty_cnt);
+                    goto capture_end;
+                }
+                continue;
+            }
+            else
+            {
+                empty_cnt = 0;
+            }
+            
             if(use_roi)
             {
                 cv::cvtColor(g_frame_original, g_frame_bgr, cv::COLOR_YUV2BGR_YUY2);
@@ -883,7 +901,7 @@ void *R_Capture_Thread(void *threadid)
             g_cap.read(g_frame);
         }
         // printf("g_frame: d=%d c=%d rows=%d cols=%d\n", 
-        //     g_frame.depth(), g_frame.channels(), g_frame.rows, g_frame.cols);
+        //      g_frame.depth(), g_frame.channels(), g_frame.rows, g_frame.cols);
 
 #ifdef DISP_CAM_FRAME_RATE
         cap_cnt++;
@@ -1058,7 +1076,7 @@ void *R_Img_Thread(void *threadid)
 
             /*Displays AI Inference Results on display.*/
             print_result(&img);
-            
+
             if (!hdmi_obj_ready.load())
             {
                 proc_image = img.get_mat().clone();
@@ -1128,7 +1146,7 @@ void *R_Display_Thread(void *threadid)
         if (hdmi_obj_ready.load())
         {
             // printf("proc_image: d=%d c=%d rows=%d cols=%d\n", 
-            //     proc_image.depth(), proc_image.channels(), proc_image.rows, proc_image.cols);
+            //    proc_image.depth(), proc_image.channels(), proc_image.rows, proc_image.cols);
 
             // display_image = proc_image.clone();
             /*Update Wayland - need to convert to BGRA for wayland*/
@@ -1140,7 +1158,8 @@ void *R_Display_Thread(void *threadid)
             // printf("display_image: d=%d c=%d rows=%d cols=%d\n", 
             //     display_image.depth(), display_image.channels(), display_image.rows, display_image.cols);
 
-            wayland.commit(display_image.data, NULL);
+            wayland.commit(display_image.data, NULL);           
+            
             hdmi_obj_ready.store(0);
         }
         usleep(WAIT_TIME); //wait 1 tick timedg
@@ -1158,7 +1177,6 @@ hdmi_end:
     printf("Display Thread Terminated\n");
     pthread_exit(NULL);
 }
-
 
 /*****************************************
 * Function Name : R_Kbhit_Thread
@@ -1327,6 +1345,7 @@ uint64_t init_drpai(int drpai_fd)
     return drpai_addr;
 }
 
+
 int32_t main(int32_t argc, char * argv[])
 {
     int8_t main_proc = 0;
@@ -1349,7 +1368,13 @@ int32_t main(int32_t argc, char * argv[])
     std::string media_port = query_device_status("RZG2L_CRU");
     // gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
 
-    gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+    // gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+
+    //Videotestsrc input
+    //gstreamer_pipeline = "videotestsrc pattern=ball ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+
+    //file input 
+    gstreamer_pipeline = "filesrc location=/home/root/output.mp4 ! qtdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw, width=1920, height=1080, format=YUY2 ! appsink -v";
 
     /*Disable OpenCV Accelerator due to the use of multithreading */
     unsigned long OCA_list[16];
@@ -1417,7 +1442,7 @@ int32_t main(int32_t argc, char * argv[])
         goto end_close_drpai;
     }
 
-    
+
     /*Load model_dir for DRP-AI inference */
     runtime_status = runtime.LoadModel(model_dir, drpaimem_addr_start);
 
