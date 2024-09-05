@@ -150,6 +150,8 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 /*Camera Capture Information */
 #define INPUT_CAM_NAME              "MIPI Camera"
 #define CAPTURE_STABLE_COUNT        (8)
+#define CAP_BUF_NUM                 (6)
+
 
 /*DRP-AI Input image information*/
 /*** DRP-AI input is assigned to the buffer having the size of CAM_IMAGE_WIDTH^2 */

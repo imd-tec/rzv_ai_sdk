@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.12)
 project(object_detection_cpp)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
+
+
 set(CMAKE_CXX_STANDARD 17)
 
 set(TVM_ROOT $ENV{TVM_HOME})
@@ -17,6 +20,10 @@ add_executable (${EXE_NAME}
 ${SOURCE}
 )
 
+find_package(PkgConfig REQUIRED)
+find_package(v4l2subdev REQUIRED)
+pkg_check_modules(MEDIACTL libmediactl IMPORTED_TARGET GLOBAL)
+
 TARGET_LINK_LIBRARIES(${EXE_NAME} pthread)
 TARGET_LINK_LIBRARIES(${EXE_NAME} jpeg)
 TARGET_LINK_LIBRARIES(${EXE_NAME} wayland-client wayland-cursor wayland-egl)
@@ -24,6 +31,8 @@ target_link_libraries(${EXE_NAME} mmngr mmngrbuf)
 target_link_libraries(${EXE_NAME} 
     opencv_imgcodecs opencv_imgproc opencv_core opencv_highgui
     EGL GLESv2 )
+
+target_link_libraries(${EXE_NAME}  PkgConfig::MEDIACTL v4l2subdev::v4l2subdev)
 
 find_package(OpenCV REQUIRED)
 if(OpenCV_FOUND)

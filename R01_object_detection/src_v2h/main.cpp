@@ -65,6 +65,7 @@
 #include "dmabuf.h"
 /*Mutual exclusion*/
 #include <mutex>
+#include "camera.hpp"
 
 
 /*****************************************
@@ -100,6 +101,7 @@ cv::Mat display_image;
 
 /*GStreamer pipeline for camera capture*/
 static std::string gstreamer_pipeline = "";
+static std::shared_ptr<Camera> camera;
 
 /*AI Inference for DRP-AI*/
 /* DRP-AI TVM[*1] Runtime object */
@@ -1022,6 +1024,192 @@ capture_end:
     pthread_exit(NULL);
 }
 
+
+void *R_Capture_Thread_v2(void *threadid)
+{
+    int throttle_count = RESET_THROTTLE;
+    int img_throttle_count = RESET_IMG_THROTTLE;
+
+    /*Semaphore Variable*/
+    int32_t capture_sem_check = 0;
+    int8_t ret = 0;
+    /* Counter to wait for the camera to stabilize */
+    uint8_t capture_stabe_cnt = CAPTURE_STABLE_COUNT;
+
+#ifdef DISP_CAM_FRAME_RATE
+    int32_t cap_cnt = -1;
+    static struct timespec capture_time;
+    static struct timespec capture_time_prev = { .tv_sec = 0, .tv_nsec = 0, };
+#endif /* DISP_CAM_FRAME_RATE */
+
+    printf("V2 Capture Thread  Starting use_bgr=%d use_roi=%d throttle_count=%d\n", 
+        use_bgr, use_roi, throttle_count);
+
+    cv::Mat g_frame_original;
+    cv::Mat g_frame_bgr;
+    cv::Mat g_frame;
+
+    while(1)
+    {
+        /*Gets the Termination request semaphore value. If different then 1 Termination was requested*/
+        /*Checks if sem_getvalue is executed wihtout issue*/
+        errno = 0;
+        ret = sem_getvalue(&terminate_req_sem, &capture_sem_check);
+        if (0 != ret)
+        {
+            fprintf(stderr, "[ERROR] Failed to get Semaphore Value: errno=%d\n", errno);
+            goto err;
+        }
+        /*Checks the semaphore value*/
+        if (1 != capture_sem_check)
+        {
+            goto capture_end;
+        }
+
+        /* Capture camera image and stop updating the capture buffer */
+        if (!camera->captureImage()) 
+        {
+            fprintf(stderr, "[ERROR] Failed to capture image from camera\n");
+            goto err;
+        }
+        uint8_t *capture_buffer_data = camera->getCaptureBufferData();
+
+        if (camera->getCaptureBufferSize() == 0)
+        {
+            fprintf(stderr, "[ERROR] Failed to capture image from camera\n");
+            goto err;
+        }
+
+        //Input is YUY2 1920x1080 but converting to BGR and if use_roi also crop 640x480 
+        if(use_bgr)
+        {   
+            //Convert to openCV matrix, then convert to BGR including ROI if needed
+            g_frame_original = cv::Mat(1080, 1920, CV_8UC2, capture_buffer_data);
+        
+            if(use_roi)
+            {
+                fprintf(stderr, "[ERROR] ROI not supported\n");
+                goto err;
+                cv::cvtColor(g_frame_original, g_frame_bgr, cv::COLOR_YUV2BGR_YUY2);
+                cv::Rect roi(0, 0, 640, 480);
+                g_frame = g_frame_bgr(roi); // Using the () operator to crop
+            }
+            else
+            {
+                cv::cvtColor(g_frame_original, g_frame, cv::COLOR_YUV2BGR_YUY2);
+            }
+        }
+        else
+        {
+            g_frame = cv::Mat(1080, 1920, CV_8UC2, capture_buffer_data);
+        }
+        // printf("g_frame: d=%d c=%d rows=%d cols=%d\n", 
+        //      g_frame.depth(), g_frame.channels(), g_frame.rows, g_frame.cols);
+
+#ifdef DISP_CAM_FRAME_RATE
+        cap_cnt++;
+        ret = timespec_get(&capture_time, TIME_UTC);
+        proc_time_capture = (timedifference_msec(capture_time_prev, capture_time) * TIME_COEF);
+        capture_time_prev = capture_time;
+
+        int idx = cap_cnt % SIZE_OF_ARRAY(array_cap_time);
+        array_cap_time[idx] = (uint32_t)proc_time_capture;
+        int arraySum = std::accumulate(array_cap_time, array_cap_time + SIZE_OF_ARRAY(array_cap_time), 0);
+        double arrayAvg = 1.0 * arraySum / SIZE_OF_ARRAY(array_cap_time);
+        cap_fps = 1.0 / arrayAvg * 1000.0 + 0.5;
+#endif /* DISP_CAM_FRAME_RATE */
+
+        /* Do not process until the camera stabilizes, because the image is unreliable until the camera stabilizes. */
+        if( capture_stabe_cnt > 0 )
+        {
+            capture_stabe_cnt--;
+        }
+        else
+        {
+            if (!inference_start.load())
+            {
+                /* Copy captured image to Image object. This will be used in Main Thread. */
+                mtx.lock();
+                
+                /*Image: CAM_IMAGE_WIDTH*CAM_IMAGE_HEIGHT (BGR) */
+                input_image = g_frame.clone();
+
+                /*Add padding for keeping the aspect ratio: CAM_IMAGE_WIDTH*CAM_IMAGE_WIDTH (BGR) */
+                if(use_bgr)
+                {
+                    cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC3);   
+                    cv::vconcat(input_image, padding_frame, input_image);
+                }
+                else
+                {
+                    cv::Mat padding_frame(CAM_IMAGE_WIDTH - CAM_IMAGE_HEIGHT, CAM_IMAGE_WIDTH, CV_8UC2); 
+                    cv::vconcat(input_image, padding_frame, input_image);
+                }
+                
+                /*Copy input data to drpai_buf for DRP-AI Pre-processing Runtime.*/
+                memcpy( drpai_buf->mem, input_image.data, drpai_buf->size);
+                /* Flush buffer */
+                ret = buffer_flush_dmabuf(drpai_buf->idx, drpai_buf->size);
+                if (0 != ret)
+                {
+                    goto err;
+                }
+                mtx.unlock();
+                if(throttle_count > 0)
+                {
+                    throttle_count--;
+                }
+                else
+                {
+                    inference_start.store(1); /* Flag for AI Inference Thread. */
+                    throttle_count = RESET_THROTTLE;
+                }
+            }
+
+            if (!img_obj_ready.load())
+            {
+                mtx.lock();
+                capture_image = g_frame.clone();
+                img.set_mat(capture_image);
+                mtx.unlock();
+
+                if(img_throttle_count > 0)
+                {
+                    img_throttle_count--;
+                }
+                else
+                {
+                    img_obj_ready.store(1); /* Flag for Img Thread. */
+                    img_throttle_count = RESET_IMG_THROTTLE;
+                }                    
+                
+            }
+        }
+  
+        // Re-queue the capture buffer. 
+        // Assumption - it is already copied/cloned to another buffer so can be re-used 
+        if (!camera->queueCaptureBuffer())
+        {
+            fprintf(stderr, "[ERROR] Failed to enqueue capture buffer\n");
+            goto err;
+        }
+
+    } /*End of Loop*/
+
+/*Error Processing*/
+err:
+    sem_trywait(&terminate_req_sem);
+    goto capture_end;
+
+capture_end:
+    /*To terminate the loop in AI Inference Thread.*/
+    inference_start.store(1);
+
+    printf("Capture Thread Terminated\n");
+    pthread_exit(NULL);
+}
+
+
 /*****************************************
 * Function Name : R_Img_Thread
 * Description   : Executes img proc with img thread
@@ -1365,16 +1553,18 @@ int32_t main(int32_t argc, char * argv[])
 
     uint64_t drpaimem_addr_start = 0;
 
+    //For gstreamer based capture
     std::string media_port = query_device_status("RZG2L_CRU");
     // gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(CAM_IMAGE_WIDTH)+", height="+std::to_string(CAM_IMAGE_HEIGHT)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
-
     // gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
-
     //Videotestsrc input
     //gstreamer_pipeline = "videotestsrc pattern=ball ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
-
     //file input 
     gstreamer_pipeline = "filesrc location=/home/root/output.mp4 ! qtdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw, width=1920, height=1080, format=YUY2 ! appsink -v";
+
+    //v4l2 based capture
+    Camera::CameraSource selected_camera_src = Camera::CameraSource::CRU1;
+    camera = std::make_shared<Camera>(selected_camera_src, CAM_IMAGE_WIDTH, CAM_IMAGE_HEIGHT);
 
     /*Disable OpenCV Accelerator due to the use of multithreading */
     unsigned long OCA_list[16];
@@ -1497,6 +1687,13 @@ int32_t main(int32_t argc, char * argv[])
         goto end_close_dmabuf;
     }
 
+    /* Start for camera */
+    if (!camera->startCamera())
+    {
+        fprintf(stderr,"Failed to initialise the camera\n");
+        goto end_close_dmabuf;
+    }
+
     /*Termination Request Semaphore Initialization*/
     /*Initialized value at 1.*/
     sem_create = sem_init(&terminate_req_sem, 0, 1);
@@ -1525,7 +1722,8 @@ int32_t main(int32_t argc, char * argv[])
         goto end_threads;
     }
     /*Create Capture Thread*/
-    create_thread_capture = pthread_create(&capture_thread, NULL, R_Capture_Thread, NULL);
+    //create_thread_capture = pthread_create(&capture_thread, NULL, R_Capture_Thread, NULL);
+    create_thread_capture = pthread_create(&capture_thread, NULL, R_Capture_Thread_v2, NULL);
     if (0 != create_thread_capture)
     {
         sem_trywait(&terminate_req_sem);
