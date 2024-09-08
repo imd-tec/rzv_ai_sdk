@@ -132,26 +132,29 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 /*****************************************
 * Macro for Application
 ******************************************/
+#define INPUT_SOURCE_USB  (1)
+#define INPUT_SOURCE_MIPI (2)
+
 /*DRP-AI memory area offset for model objects*/
 /*Offset value depends on the size of memory area used by DRP-AI Pre-processing Runtime Object files*/
 #define DRPAI_MEM_OFFSET            (0)
 
 /*Camera Capture Image Information*/
-#define CAM_IMAGE_WIDTH             (640)
-#define CAM_IMAGE_HEIGHT            (480)
+#define CAM_IMAGE_WIDTH             (1920)//(640)
+#define CAM_IMAGE_HEIGHT            (1080)//(480)
 
 /*DRP-AI Input image information*/
 #define DRPAI_IN_WIDTH              (CAM_IMAGE_WIDTH)
 #define DRPAI_IN_HEIGHT             (CAM_IMAGE_HEIGHT)
 
-#define IMAGE_OUTPUT_WIDTH          (1920)
-#define IMAGE_OUTPUT_HEIGHT         (1080)
+#define IMAGE_OUTPUT_WIDTH          (1024)//(1920)
+#define IMAGE_OUTPUT_HEIGHT         (600)//(1080)
 #define IMAGE_CHANNEL_BGRA          (4)
 
-#define DISP_IMAGE_OUTPUT_WIDTH     (1480)
-#define DISP_IMAGE_OUTPUT_HEIGHT    (1050)
-#define DISP_OUTPUT_WIDTH           (1920)
-#define DISP_OUTPUT_HEIGHT          (1080)
+#define DISP_IMAGE_OUTPUT_WIDTH     (800)//(1480)
+#define DISP_IMAGE_OUTPUT_HEIGHT    (570) //(1050)
+#define DISP_OUTPUT_WIDTH           (1024)//(1920)
+#define DISP_OUTPUT_HEIGHT          (600)//(1080)
 
 /*Waiting Time*/
 #define WAIT_TIME                   (1000) /* microseconds */

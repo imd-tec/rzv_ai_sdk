@@ -65,9 +65,11 @@
 /*****************************************
 * Global Variables
 ******************************************/
+static int input_source = INPUT_SOURCE_USB;
 std::map<std::string, int> input_source_map =
 {
-    {"USB", 1}
+    {"USB", INPUT_SOURCE_USB},
+    {"MIPI", INPUT_SOURCE_MIPI},
 };
 
 /*Multithreading*/
@@ -852,6 +854,7 @@ void *R_Capture_Thread(void *cap_pipeline)
     int32_t capture_sem_check = 0;
     int8_t ret = 0;
     cv::Mat g_frame;
+    cv::Mat g_frame_original;
     cv::Mat raw_frame;
     cv::VideoCapture g_cap;
 
@@ -866,9 +869,9 @@ void *R_Capture_Thread(void *cap_pipeline)
     }
     /* Set camera resolution */
     /* set width */
-    g_cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+    //g_cap.set(cv::CAP_PROP_FRAME_WIDTH, CAM_IMAGE_WIDTH); 
     /* set height */
-    g_cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+    //g_cap.set(cv::CAP_PROP_FRAME_HEIGHT, CAM_IMAGE_HEIGHT);
     while(1)
     {
         /*Gets the Termination request semaphore value. If different then 1 Termination was requested*/
@@ -886,7 +889,25 @@ void *R_Capture_Thread(void *cap_pipeline)
             goto capture_end;
         }
 
-        g_cap >> g_frame;
+        if(input_source == INPUT_SOURCE_USB)
+        {
+            g_cap >> g_frame;
+        }
+        else
+        {
+            //If input is MIPI need to convert format to BGR
+            g_cap >> g_frame_original;
+            if (g_frame_original.empty())
+            {
+                std::cout << "[INFO] Video ended or corrupted frame !\n";
+                goto capture_end;
+            }
+            else
+            {
+                cv::cvtColor(g_frame_original, g_frame, cv::COLOR_YUV2BGR_YUY2);
+            }
+        }
+
         /* Breaking the loop if no video frame is detected */
         if (g_frame.empty())
         {
@@ -1003,9 +1024,9 @@ int8_t R_Main_Process()
     std::string DISPLAY_TEXT = ini_values["display"]["display_text"];
     std::string DISPLAY_REGION_TEXT = ini_values["display"]["region_display_text"];
     std::string g_pipeline = "appsrc ! videoconvert ! autovideosink sync=false ";
-    float font_size = .9;
-    float font_weight = 2;
-    float font_size_dt = 0.75;
+    float font_size = 0.5;//.9;
+    float font_weight = 0.8;//2;
+    float font_size_dt = 0.6; //0.75;
     float font_size_bb = 0.5;
     float font_weight_bb = 1;
     if (DISPLAY_TEXT.size() > 20 || DISPLAY_REGION_TEXT.size() > 20)
@@ -1128,18 +1149,31 @@ int8_t R_Main_Process()
             cv::line(bgra_image, cv::Point(pointx1, pointy1), cv::Point(pointx2, pointy2), cv::Scalar(0, 0, 255), 4);
             cv::polylines(bgra_image, polygon, true, cv::Scalar(0, 255, 0), 2);
             bgra_image = create_output_frame(bgra_image);
-            cv::putText(bgra_image, "Preprocess Time   : " + std::to_string(int(pre_time)), cv::Point(1500, 60), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
-            cv::putText(bgra_image, "AI Inference Time  : " + std::to_string(int(ai_time)), cv::Point(1503, 95), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
-            cv::putText(bgra_image, "Postprocess Time  : " + std::to_string(int(post_time)), cv::Point(1500, 127), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
-            cv::putText(bgra_image, DISPLAY_TEXT + " : " + std::to_string(actual_count), cv::Point(1500, 180), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
-            cv::putText(bgra_image, DISPLAY_REGION_TEXT + " : " + std::to_string(region_count), cv::Point(1500, 210), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
-            cv::putText(bgra_image, "Objects Detected : ", cv::Point(1500, 270), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            int x_offset = 820;
+            cv::putText(bgra_image, "Preprocess Time   : " + std::to_string(int(pre_time)), cv::Point(x_offset, 60), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            cv::putText(bgra_image, "AI Inference Time  : " + std::to_string(int(ai_time)), cv::Point(x_offset+3, 95), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            cv::putText(bgra_image, "Postprocess Time  : " + std::to_string(int(post_time)), cv::Point(x_offset, 127), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            cv::putText(bgra_image, DISPLAY_TEXT + " : " + std::to_string(actual_count), cv::Point(x_offset, 180), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            cv::putText(bgra_image, DISPLAY_REGION_TEXT + " : " + std::to_string(region_count), cv::Point(x_offset, 210), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            cv::putText(bgra_image, "Objects Detected : ", cv::Point(x_offset, 270), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);            
             mtx.lock();
             for (int i = 0; i < bbox.size(); i++)
             {
-                cv::putText(bgra_image, bbox[i].name, cv::Point(1510, (320 + (i * 30))), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+                cv::putText(bgra_image, bbox[i].name, cv::Point(x_offset+10, (320 + (i * 30))), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
             }
             mtx.unlock();
+            // cv::putText(bgra_image, "Preprocess Time   : " + std::to_string(int(pre_time)), cv::Point(1500, 60), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // cv::putText(bgra_image, "AI Inference Time  : " + std::to_string(int(ai_time)), cv::Point(1503, 95), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // cv::putText(bgra_image, "Postprocess Time  : " + std::to_string(int(post_time)), cv::Point(1500, 127), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // cv::putText(bgra_image, DISPLAY_TEXT + " : " + std::to_string(actual_count), cv::Point(1500, 180), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // cv::putText(bgra_image, DISPLAY_REGION_TEXT + " : " + std::to_string(region_count), cv::Point(1500, 210), cv::FONT_HERSHEY_SIMPLEX, font_size_dt, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // cv::putText(bgra_image, "Objects Detected : ", cv::Point(1500, 270), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // mtx.lock();
+            // for (int i = 0; i < bbox.size(); i++)
+            // {
+            //     cv::putText(bgra_image, bbox[i].name, cv::Point(1510, (320 + (i * 30))), cv::FONT_HERSHEY_SIMPLEX, font_size, cv::Scalar(255, 255, 255), font_weight, cv::LINE_AA);
+            // }
+            // mtx.unlock();
             cv::cvtColor(bgra_image,bgra_image,cv::COLOR_BGR2BGRA);
             /*Update Wayland*/
             wayland.commit(bgra_image.data,NULL);
@@ -1275,24 +1309,35 @@ int32_t main(int32_t argc, char * argv[])
     bool runtime_status = false;
     std::string gstreamer_pipeline;
 
-    if (argc < 2) 
-    {
-        std::cout << "[ERROR] Please specify Input Source\n";
-        std::cout << "[INFO] usage: ./object_tracker USB.\n";
-        std::cout << "[INFO] End Application.\n";
-        return -1;
-    }
-    std::string input_source = argv[1];
-    switch (input_source_map[input_source])
+    // if (argc < 2) 
+    // {
+    //     std::cout << "[ERROR] Please specify Input Source\n";
+    //     std::cout << "[INFO] usage: ./object_tracker USB.\n";
+    //     std::cout << "[INFO] End Application.\n";
+    //     return -1;
+    // }
+    std::string input_source_string = "MIPI"; //argv[1];
+    switch (input_source_map[input_source_string])
     {
         /* Input Source : USB Camera */
-        case 1:
+        case INPUT_SOURCE_USB:
         {
             std::cout << "[INFO] USB CAMERA \n";
+            input_source = INPUT_SOURCE_USB;
             std::string media_port = query_device_status("usb");
             gstreamer_pipeline = "v4l2src device=" + media_port + " ! videoconvert ! appsink";
         }
         break;
+
+        case INPUT_SOURCE_MIPI:
+        {
+            std::cout << "[INFO] MIPI CAMERA \n";
+            input_source = INPUT_SOURCE_MIPI;
+            std::string media_port = query_device_status("RZG2L_CRU");
+            gstreamer_pipeline = "v4l2src device=" + media_port +" ! video/x-raw, width="+std::to_string(1920)+", height="+std::to_string(1080)+" ,framerate=30/1 ! videoconvert ! video/x-raw,format=YUY2,width=1920,height=1080,framerate=30/1 ! appsink -v";
+        }
+        break;
+
         default:
         {
             std::cout << "[ERROR] Invalid Input source\n";
@@ -1321,7 +1366,7 @@ int32_t main(int32_t argc, char * argv[])
     std::cout<<"\n[INFO] DRPAI FREQUENCY : "<<drpai_freq<<"\n";
     
     /* RZ/V2H AI SDK Sample Application */
-    printf("\nRZ/V2H AI SDK Sample Application\n");
+    printf("\nRZ/V2H AI SDK Sample Application - IMDT modified\n");
     printf("Model : Darknet YOLOv3 | %s\n", model_dir.c_str());
 
     int drpai_fd = open("/dev/drpai0", O_RDWR);
@@ -1408,15 +1453,15 @@ int32_t main(int32_t argc, char * argv[])
     }
 
     /* Create exit Thread */
-    create_thread_exit = pthread_create(&exit_thread, NULL, R_exit_Thread, NULL);
-    if (0 != create_thread_exit)
-    {
-        fprintf(stderr, "[ERROR] Failed to create exit Thread.\n");
-        ret_main = -1;
-        goto end_threads;
-    }
-    /* Detached exit thread */
-    pthread_detach(exit_thread);
+    // create_thread_exit = pthread_create(&exit_thread, NULL, R_exit_Thread, NULL);
+    // if (0 != create_thread_exit)
+    // {
+    //     fprintf(stderr, "[ERROR] Failed to create exit Thread.\n");
+    //     ret_main = -1;
+    //     goto end_threads;
+    // }
+    // /* Detached exit thread */
+    // pthread_detach(exit_thread);
 
     /* Create Key Hit Thread */
     create_thread_key = pthread_create(&kbhit_thread, NULL, R_Kbhit_Thread, NULL);
