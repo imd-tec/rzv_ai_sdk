@@ -285,8 +285,11 @@ void Image::convert_size(int in_w, int resize_w, bool is_padding)
 
     if (is_padding)
     {
-        cv::resize(org_image, resize_image, cv::Size(), 1.0 * out_h / img_h, 1.0 * out_h / img_h);
-        copyMakeBorder(resize_image, resize_image, 0, 0, 0, out_w - resize_image.cols, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0, 255));
+        // printf("org_image %dx%d -> %dx%d\n", org_image.cols, org_image.rows, out_w, out_h);
+        // cv::resize(org_image, resize_image, cv::Size(), 1.0 * out_h / img_h, 1.0 * out_h / img_h);
+        // printf("resize image %d %d border %d\n", resize_image.cols, resize_image.rows, out_w - resize_image.cols);
+        // copyMakeBorder(resize_image, resize_image, 0, 0, 0, out_w - resize_image.cols, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0, 255));
+        cv::resize(org_image, resize_image, cv::Size(out_w, out_h));
         img_mat = resize_image;
     }
     else

@@ -159,8 +159,8 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 #define DRPAI_IN_HEIGHT             (CAM_IMAGE_WIDTH) 
 
 /*Wayland Display Image Information*/
-#define IMAGE_OUTPUT_WIDTH          (1920)
-#define IMAGE_OUTPUT_HEIGHT         (1080)
+#define IMAGE_OUTPUT_WIDTH          (1024)//(1920)
+#define IMAGE_OUTPUT_HEIGHT         (600)//(1080)
 #define IMAGE_OUTPUT_CHANNEL_BGRA   (4)
 
 /*DRP-AI Input image information*/
@@ -168,16 +168,16 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 #define DRPAI_OUT_HEIGHT            (IMAGE_OUTPUT_HEIGHT)
 
 /*Image:: Information for drawing on image*/
-#define CHAR_SCALE_LARGE            (1.0)
-#define CHAR_SCALE_SMALL            (0.9)
-#define CHAR_SCALE_VERY_SMALL       (0.6)
-#define CHAR_THICKNESS              (2)
-#define CHAR_SCALE_BB               (0.4)
-#define CHAR_THICKNESS_BB           (1)
-#define LINE_HEIGHT                 (30) /*in pixel*/
-#define LINE_HEIGHT_OFFSET          (20) /*in pixel*/
-#define TEXT_WIDTH_OFFSET           (10) /*in pixel*/
-#define WHITE_DATA                  (0xFFFFFFu) /* in RGB */
+#define CHAR_SCALE_LARGE            (0.8)//(1.0)
+#define CHAR_SCALE_SMALL            (0.7)//(0.9)
+#define CHAR_SCALE_VERY_SMALL       (0.5)//(0.6)
+#define CHAR_THICKNESS              1//(2)
+#define CHAR_SCALE_BB               0.3//(0.4)
+#define CHAR_THICKNESS_BB           0.8//(1)
+#define LINE_HEIGHT                 (20)//(30) /*in pixel*/
+#define LINE_HEIGHT_OFFSET          (15)//(20) /*in pixel*/
+#define TEXT_WIDTH_OFFSET           (5)//(10) /*in pixel*/
+#define WHITE_DATA                  (0xFFFF00u)//(0xFFFFFFu) /* in RGB */
 #define BLACK_DATA                  (0x000000u) /* in RGB */
 #define GREEN_DATA                  (0x00FF00u) /* in RGB */
 #define RGB_FILTER                  (0x0000FFu) /* in RGB */
@@ -186,7 +186,7 @@ const static uint32_t INF_OUT_SIZE  = (NUM_CLASS + 5) * NUM_BB * num_grids[0] * 
 #define ALIGHN_LEFT                 (1)
 #define ALIGHN_RIGHT                (2)
 /*For termination method display*/
-#define TEXT_START_X                (1440) 
+#define TEXT_START_X                (680)//(1440) 
 
 /* DRPAI_FREQ is the frequency settings  */
 /* for DRP-AI.                           */
